@@ -1,3 +1,8 @@
+import os
+
+# Set the OLLAMA_HOST environment variable
+os.environ['OLLAMA_HOST'] = 'http://10.65.168.147:11434'
+
 import ollama
 import markdown
 import re
@@ -85,7 +90,7 @@ def _generate_iterative_summary(df, initial_prompt, refinement_prompt, ollama_mo
             {"role": "user", "content": current_prompt}
         ]
         response = ollama.chat(model=ollama_model, messages=messages)
-        previous_summary_md = response.message.content
+        previous_summary_md = response['message']['content']
 
         # --- NEW: Display the LLM response in the terminal ---
         print("\n" + "--- LLM Response ---".center(60, "-"))

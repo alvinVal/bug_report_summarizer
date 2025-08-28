@@ -10,17 +10,25 @@ from graphs import (
     generate_reports_over_time_line,
 )
 
+# For faster outputs
+# OLLAMA_MODEL = 'llama3:8b'
 
-OLLAMA_MODEL = 'llama3.1:8b'
+# For better outputs
+OLLAMA_MODEL = 'llama3.3:70b-instruct-q2_K'
+
 CHUNK_SIZE = 5
 
 if __name__ == '__main__':
     csv_filepath = 'project_data.csv'
     component_cols = ['Component/s']
-    project_col = 'Project List'
+    project_col = 'Dyson Project List'
     output_dir = './project_component_csvs'
 
-    # Preprocess data once for both graphing and AI summaries.
+    # Create output directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Preprocess data once for all operations.
     all_df = load_and_preprocess(csv_filepath, component_cols, project_col)
 
     # --- Generate all graphs for each project ---
@@ -28,11 +36,11 @@ if __name__ == '__main__':
     for project_code in all_df[project_col].unique():
         project_df = all_df[all_df[project_col] == project_code]
         project_graphs[project_code] = {
-            'reports_per_component': generate_reports_per_component_bar(project_df, project_code),
-            'resolution_pie': generate_resolution_pie(project_df, project_code),
-            'priority_chart': generate_grouped_bar_chart(project_df, project_code, 'Priority'),
-            'severity_chart': generate_grouped_bar_chart(project_df, project_code, 'Severity'),
-            'reports_over_time': generate_reports_over_time_line(project_df, project_code),
+            'reports_per_component': generate_reports_per_component_bar(project_df),
+            'resolution_pie': generate_resolution_pie(project_df),
+            'priority_chart': generate_grouped_bar_chart(project_df, 'Priority'),
+            'severity_chart': generate_grouped_bar_chart(project_df, 'Severity'),
+            'reports_over_time': generate_reports_over_time_line(project_df),
         }
 
     # Split data and save component-level CSVs.
@@ -47,7 +55,7 @@ if __name__ == '__main__':
     html_report = build_html_report(
         project_overall_summaries,
         project_component_summaries,
-        project_graphs, # Pass graphs to the report builder
+        project_graphs,  # Pass graphs to the report builder
         output_dir
     )
 

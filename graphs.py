@@ -1,82 +1,87 @@
-import plotly.express as px
+import seaborn as sns
 import pandas as pd
+import matplotlib.pyplot as plt
+import base64
+from io import BytesIO
 
 # --- TROUBLESHOOTING ---
 # Set this to True to display each chart in a pop-up window as it's created.
-# Set it to False for normal operation.
 SHOW_CHARTS_FOR_DEBUG = False
 
 # Define a consistent and pleasing color scheme for the charts.
-PLOTLY_TEMPLATE = "seaborn"
-PROJECT_COLORS = px.colors.qualitative.Vivid
+sns.set_theme(style="whitegrid", palette="viridis")
 
 
-def generate_reports_per_component_bar(project_df, project_code):
-    """Generates a horizontal bar chart of report counts per component."""
+def _save_fig_to_base64():
+    """Saves the current matplotlib figure to a base64 encoded string."""
+    buf = BytesIO()
+    plt.savefig(buf, format="png", bbox_inches='tight')
+    plt.close()  # Close the figure to free memory
+    return "data:image/png;base64," + base64.b64encode(buf.getbuffer()).decode("ascii")
+
+
+def generate_reports_per_component_bar(project_df):
+    """Generates a horizontal bar chart of report counts per component using Seaborn."""
     if 'All_Components_List' not in project_df.columns:
         return ""
 
     component_counts = project_df.explode('All_Components_List')['All_Components_List'].value_counts().reset_index()
     component_counts.columns = ['Component', 'Count']
-    component_counts = component_counts.sort_values('Count', ascending=True)
 
-    fig = px.bar(
-        component_counts,
+    plt.figure(figsize=(10, 6))
+    ax = sns.barplot(
+        data=component_counts,
         x='Count',
         y='Component',
-        orientation='h',
-        title=f'Bug Reports per Component for Project {project_code}',
-        labels={'Count': 'Number of Reports', 'Component': 'Component'},
-        template=PLOTLY_TEMPLATE,
-        color_discrete_sequence=['#0072ff']
+        hue='Component',
+        legend=False,
+        orient='h',
+        palette='viridis'
     )
-    # Ensure title and axis labels are centered
-    fig.update_layout(
-        title_x=0.5,
-        xaxis_title_standoff=15,
-        yaxis_title_standoff=15,
-        margin=dict(t=50, b=20, l=20, r=20),
-        yaxis={'categoryorder': 'total ascending'}
-    )
+    ax.set_xlabel('Number of Reports', fontsize=12)
+    ax.set_ylabel('Component', fontsize=12)
 
     if SHOW_CHARTS_FOR_DEBUG:
-        fig.show()
+        plt.show()
 
-    return fig.to_html(full_html=False, include_plotlyjs=False)
+    return _save_fig_to_base64()
 
 
-def generate_resolution_pie(project_df, project_code):
-    """Generates a pie chart of report resolutions with correct hover data."""
-    resolution_counts = project_df['Resolution'].value_counts().reset_index()
-    resolution_counts.columns = ['Resolution', 'Count']
+def generate_resolution_pie(project_df):
+    """Generates a pie chart of report resolutions with an external legend."""
+    resolution_counts = project_df['Resolution'].value_counts()
 
-    fig = px.pie(
-        names=resolution_counts['Resolution'],
-        values=resolution_counts['Count'],
-        title=f'Report Resolutions for Project {project_code}',
-        template=PLOTLY_TEMPLATE,
-        color_discrete_sequence=px.colors.qualitative.Set2,
-        hole=0.3
+    colors = sns.color_palette('plasma', len(resolution_counts))
+
+    plt.figure(figsize=(8, 6))
+
+    total = resolution_counts.sum()
+    labels_with_pct = [f'{label} ({count / total:.1%})' for label, count in resolution_counts.items()]
+
+    wedges, texts = plt.pie(
+        resolution_counts,
+        startangle=140,
+        colors=colors,
+        wedgeprops={'edgecolor': 'white'}
     )
-    fig.update_traces(
-        textinfo='percent+label',
-        pull=[0.05, 0, 0, 0],
-        hovertemplate='<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>'
+
+    plt.legend(
+        wedges,
+        labels_with_pct,
+        title="Resolutions",
+        loc="center left",
+        bbox_to_anchor=(0.9, 0, 0.5, 1)
     )
-    fig.update_layout(
-        title_x=0.5,
-        margin=dict(t=50, b=20, l=20, r=20),
-        legend_title_text='Resolution Status'
-    )
+    plt.ylabel('')
 
     if SHOW_CHARTS_FOR_DEBUG:
-        fig.show()
+        plt.show()
 
-    return fig.to_html(full_html=False, include_plotlyjs=False)
+    return _save_fig_to_base64()
 
 
-def generate_grouped_bar_chart(project_df, project_code, group_col):
-    """Generates a grouped bar chart for Priority or Severity per component."""
+def generate_grouped_bar_chart(project_df, group_col):
+    """Generates a grouped bar chart for Priority or Severity per component using Seaborn."""
     if 'All_Components_List' not in project_df.columns:
         return ""
 
@@ -89,52 +94,50 @@ def generate_grouped_bar_chart(project_df, project_code, group_col):
         "Severity": ["Low", "Medium", "High", "Critical"]
     }
 
-    fig = px.bar(
-        data,
+    plt.figure(figsize=(12, 7))
+    ax = sns.barplot(
+        data=data,
         x='Component',
         y='Count',
-        color=group_col,
-        barmode='group',
-        title=f'{group_col} Distribution per Component',
-        template=PLOTLY_TEMPLATE,
-        color_discrete_sequence=px.colors.qualitative.Bold,
-        category_orders={group_col: category_orders.get(group_col, [])}
+        hue=group_col,
+        palette='magma',
+        hue_order=category_orders.get(group_col)
     )
-    fig.update_layout(title_x=0.5, margin=dict(t=50, b=20, l=20, r=20))
+    ax.set_xlabel('Component', fontsize=12)
+    ax.set_ylabel('Count', fontsize=12)
+    plt.xticks(rotation=45, ha='right')
+    plt.legend(title=group_col)
 
     if SHOW_CHARTS_FOR_DEBUG:
-        fig.show()
+        plt.show()
 
-    return fig.to_html(full_html=False, include_plotlyjs=False)
+    return _save_fig_to_base64()
 
 
-def generate_reports_over_time_line(project_df, project_code):
-    """Generates a line chart of new reports per month for each component."""
-    if 'All_Components_List' not in project_df.columns or 'Created' not in project_df.columns:
+def generate_reports_over_time_line(project_df):
+    """Generates a line chart of new reports per month for the entire project."""
+    if 'Created' not in project_df.columns:
         return ""
 
-    df_time = project_df.explode('All_Components_List').copy()
+    df_time = project_df.copy()
 
     monthly_counts = df_time.groupby(
-        ['All_Components_List', pd.Grouper(key='Created', freq='ME')]
+        pd.Grouper(key='Created', freq='ME')
     ).size().reset_index(name='Count')
 
-    monthly_counts.rename(columns={'All_Components_List': 'Component'}, inplace=True)
-
-    fig = px.line(
-        monthly_counts,
+    plt.figure(figsize=(12, 6))
+    ax = sns.lineplot(
+        data=monthly_counts,
         x='Created',
         y='Count',
-        color='Component',
-        markers=True,
-        title=f'New Reports per Month for Project {project_code}',
-        labels={'Created': 'Month', 'Count': 'Number of New Reports'},
-        template=PLOTLY_TEMPLATE,
-        color_discrete_sequence=PROJECT_COLORS
+        marker='o',
+        color='#0072ff'
     )
-    fig.update_layout(title_x=0.5, margin=dict(t=50, b=20, l=20, r=20))
+    ax.set_xlabel('Month', fontsize=12)
+    ax.set_ylabel('Number of New Reports', fontsize=12)
+    plt.xticks(rotation=45, ha='right')
 
     if SHOW_CHARTS_FOR_DEBUG:
-        fig.show()
+        plt.show()
 
-    return fig.to_html(full_html=False, include_plotlyjs=False)
+    return _save_fig_to_base64()

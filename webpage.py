@@ -1,3 +1,5 @@
+import os
+
 def build_html_report(project_overall_summaries, project_component_summaries, project_graphs, output_dir):
     """
     Builds an HTML report with a clean, multi-row dashboard layout for graphs,
@@ -9,7 +11,6 @@ def build_html_report(project_overall_summaries, project_component_summaries, pr
       <meta charset="UTF-8">
       <title>Bug Report Summary</title>
       <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-      <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
       <style>
         body {
           font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -42,12 +43,29 @@ def build_html_report(project_overall_summaries, project_component_summaries, pr
           border-bottom: 2px solid #ddd;
           padding-bottom: 8px;
         }
+        .graph-title {
+          font-size: 18px;
+          font-weight: 600;
+          color: #29384a;
+          text-align: center;
+          margin-bottom: 15px;
+        }
         .graph-box {
           border: 1px solid #e3e3e3;
           border-radius: 12px;
-          padding: 15px;
+          padding: 20px;
           box-shadow: 0 4px 8px rgba(0,0,0,0.05);
           height: 100%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: flex-start;
+        }
+        .graph-box img {
+          max-width: 100%;
+          max-height: 100%;
+          height: auto;
+          border-radius: 8px;
         }
         .summary-box {
           background: #004080;
@@ -105,24 +123,41 @@ def build_html_report(project_overall_summaries, project_component_summaries, pr
         html += '<div class="row g-4">\n'
 
         # --- Row 1: Bar and Pie Charts Side-by-Side ---
-        html += '<div class="col-md-8">\n'
-        html += f'<div class="graph-box">{graphs.get("reports_per_component", "")}</div>\n'
+        html += '<div class="col-md-7">\n'
+        html += f'''<div class="graph-box">
+                       <div class="graph-title">Bug Reports per Component</div>
+                       <img src="{graphs.get("reports_per_component", "")}" alt="Reports per Component Graph">
+                     </div>'''
         html += '</div>\n'
-        html += '<div class="col-md-4">\n'
-        html += f'<div class="graph-box">{graphs.get("resolution_pie", "")}</div>\n'
-        html += '</div>\n'
-
-        # --- Row 2: Priority and Severity Charts ---
-        html += '<div class="col-md-6">\n'
-        html += f'<div class="graph-box">{graphs.get("priority_chart", "")}</div>\n'
-        html += '</div>\n'
-        html += '<div class="col-md-6">\n'
-        html += f'<div class="graph-box">{graphs.get("severity_chart", "")}</div>\n'
+        html += '<div class="col-md-5">\n'
+        html += f'''<div class="graph-box">
+                       <div class="graph-title">Report Resolutions</div>
+                       <img src="{graphs.get("resolution_pie", "")}" alt="Resolutions Pie Chart">
+                     </div>'''
         html += '</div>\n'
 
-        # --- Row 3: Time Series Chart (Full Width) ---
+        # --- Row 2: Priority Chart (Full Width) ---
         html += '<div class="col-12">\n'
-        html += f'<div class="graph-box">{graphs.get("reports_over_time", "")}</div>\n'
+        html += f'''<div class="graph-box">
+                       <div class="graph-title">Priority Distribution per Component</div>
+                       <img src="{graphs.get("priority_chart", "")}" alt="Priority Chart">
+                     </div>'''
+        html += '</div>\n'
+
+        # --- Row 3: Severity Chart (Full Width) ---
+        html += '<div class="col-12">\n'
+        html += f'''<div class="graph-box">
+                       <div class="graph-title">Severity Distribution per Component</div>
+                       <img src="{graphs.get("severity_chart", "")}" alt="Severity Chart">
+                     </div>'''
+        html += '</div>\n'
+
+        # --- Row 4: Time Series Chart (Full Width) ---
+        html += '<div class="col-12">\n'
+        html += f'''<div class="graph-box">
+                       <div class="graph-title">New Reports Over Time (All Components)</div>
+                       <img src="{graphs.get("reports_over_time", "")}" alt="Reports Over Time Graph">
+                     </div>'''
         html += '</div>\n'
 
         html += '</div>\n</div>\n'
@@ -149,7 +184,7 @@ def build_html_report(project_overall_summaries, project_component_summaries, pr
         for comp, fields in sorted_components:
             csv_path = f'{output_dir}/{project}_{comp.replace(" ", "_").replace("/", "_")}.csv'
             html += '<tr>\n'
-            html += f'<td class="component-name"><a href="{csv_path}">{comp}</a></td>\n'
+            html += f'<td class="component-name"><a href="file://{os.path.abspath(csv_path)}">{comp}</a></td>\n'
             html += f'<td>{fields.get("summary", "N/A")}</td>\n'
             html += f'<td>{fields.get("rec_devs", "N/A")}</td>\n'
             html += f'<td>{fields.get("rec_testers", "N/A")}</td>\n'
@@ -171,4 +206,5 @@ def build_html_report(project_overall_summaries, project_component_summaries, pr
         html += '</div>\n'
 
     html += '</div><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script></body>\n</html>'
+
     return html
