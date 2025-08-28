@@ -1,225 +1,159 @@
-def impact_color(impact):
-    impact = str(impact).lower()
-    if impact == "high":
-        return "#FF0000"  # Red for high impact
-    elif impact == "medium":
-        return "#FFA500"  # Orange for medium impact
-    elif impact == "low":
-        return "#00FF00"  # Green for low impact
-    else:
-        return "#CCCCCC"  # Default grey
+import re
 
 
-def build_html_report(overall_summary, summaries, components_dir='/component_csvs'):
-    js_function = """
-    <script>
-    function openCSVPage(csvFile) {
-      var newWindow = window.open("", "_blank");
-      var newHtml = `
-        <!DOCTYPE html>
-        <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <title>Component Bug Reports</title>
-            <style>
-              body { font-family: Arial, sans-serif; margin: 40px; background: #f9f9f9; }
-              table { width: 100%; border-collapse: collapse; background: #fff; }
-              th, td { padding: 10px; border: 1px solid #ccc; }
-              tr:hover td { background: #eef2f6; }
-            </style>
-            <script>
-              document.addEventListener("DOMContentLoaded", function(){
-                fetch(csvFile)
-                  .then(response => response.text())
-                  .then(data => {
-                    // Notice the correct escaped newline: '\\n'
-                    var rowData = data.split('\\n');
-                    var table = document.getElementById('tblcsvdata');
-                    var tbody = table.querySelector('tbody');
-                    rowData.forEach(function(row) {
-                      if(row.trim() !== '') {
-                        var cols = row.split(',');
-                        var tr = document.createElement('tr');
-                        cols.forEach(function(col) {
-                          var td = document.createElement('td');
-                          td.textContent = col;
-                          tr.appendChild(td);
-                        });
-                        tbody.appendChild(tr);
-                      }
-                    });
-                  })
-                  .catch(error => console.error('Error loading CSV:', error));
-              });
-            <\/script>
-          </head>
-          <body>
-            <h2>Bug Reports for the Selected Component</h2>
-            <table id="tblcsvdata">
-              <thead></thead>
-              <tbody></tbody>
-            </table>
-          </body>
-        </html>
-      `;
-      console.log("Generated HTML:", newHtml);
-      newWindow.document.write(newHtml);
-      newWindow.document.close();
-    }
-    </script>
+def strip_html_tags(text):
+    return re.sub(r'<[^>]*>', '', text or '').strip()
+
+
+def build_html_report(project_overall_summaries, project_component_summaries, output_dir):
     """
-
-    html = f"""
-    <!DOCTYPE html>
-    <html lang="en">
+    Build an HTML report with these changes:
+      • Overall project summary displays only Summary and Potential Customer Impact.
+      • In the table of component summaries, the Component name is vertically centered.
+      • The Impact Level remains trimmed and color-coded.
+    """
+    html = '''
+    <html>
     <head>
-        <meta charset="UTF-8">
-        <title>Bug Report Summary</title>
-        <style>
-            body {{
-                font-family: Arial, sans-serif;
-                margin: 40px;
-                background: #f9f9f9;
-            }}
-            .summary-box {{
-                background: #004080;
-                color: #fff;
-                padding: 24px;
-                border-radius: 12px;
-                margin-bottom: 36px;
-                font-size: 18px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.07);
-            }}
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-                background: #fff;
-            }}
-            th, td {{
-                padding: 14px 10px;
-                border-bottom: 1px solid #e3e3e3;
-                vertical-align: top;
-            }}
-            th {{
-                background: #29384a;
-                color: #fff;
-                font-weight: bold;
-            }}
-            tr:hover td {{
-                background: #eef2f6;
-            }}
-            .impact {{ 
-                font-weight: bold; 
-                color: #fff; 
-                border-radius: 8px; 
-                padding: 4px 12px; 
-                display: inline-block; 
-            }}
-            .center-fallback {{ 
-                text-align: center; 
-                color: #555; 
-                font-style: italic; 
-                padding: 20px; 
-            }}
-        </style>
-        {js_function}
+      <meta charset="UTF-8">
+      <title>Bug Report Summary</title>
+      <style>
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          margin: 40px;
+          background: #f1f3f6;
+        }
+        .project-section {
+          margin-bottom: 60px;
+        }
+        .project-code {
+          font-size: 26px;
+          font-weight: bold;
+          color: #fff;
+          background: linear-gradient(135deg, #0072ff, #00c6ff);
+          padding: 12px 20px;
+          border-radius: 8px;
+          box-shadow: 0px 4px 6px rgba(0,0,0,0.2);
+          display: inline-block;
+          margin-bottom: 20px;
+        }
+        .summary-box {
+          background: #004080;
+          color: #fff;
+          padding: 24px;
+          border-radius: 12px;
+          margin-bottom: 36px;
+          font-size: 18px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          background: #fff;
+          margin-bottom: 20px;
+          border: 1px solid #ddd;
+          box-shadow: 0px 2px 4px rgba(0,0,0,0.1);
+        }
+        th, td {
+          padding: 14px 12px;
+          border: 1px solid #e3e3e3;
+          vertical-align: top;
+          white-space: pre-wrap;
+        }
+        /* Center the component name vertically */
+        td.component-name {
+          vertical-align: middle;
+        }
+        th {
+          background: #29384a;
+          color: #fff;
+          font-weight: bold;
+        }
+        tr:hover td {
+          background: #eef2f6;
+        }
+        .impact {
+          font-weight: bold;
+          color: #fff;
+          border-radius: 8px;
+          padding: 4px 12px;
+          display: inline-block;
+        }
+        .impact-high {
+          background: #d9534f;
+        }
+        .impact-medium {
+          background: #f0ad4e;
+        }
+        .impact-low {
+          background: #5cb85c;
+        }
+        .impact-default {
+          background: #777;
+        }
+      </style>
     </head>
     <body>
-        <div class="summary-box">
-            <h2>Overall Summary</h2>
-            {overall_summary}
-        </div>
-        <table>
-            <thead>
-              <tr>
-                <th>Component</th>
-                <th>Summary of Issues</th>
-                <th>Recommendations for Developers</th>
-                <th>Recommendations for Testers</th>
-                <th>Potential Customer Impact</th>
-                <th>Impact Level</th>
-              </tr>
-            </thead>
-            <tbody>
-    """
+    '''
+    # Define sorting order for impact.
+    impact_order = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
 
-    # Define an order for impact levels: highest first.
-    impact_order = {"high": 3, "medium": 2, "low": 1}
-    # Sort the summaries in descending order based on the defined impact level.
-    sorted_summaries = sorted(
-        summaries,
-        key=lambda x: impact_order.get(x.get("impact", "").lower(), 0),
-        reverse=True
-    )
+    def comp_sort_key(item):
+        field_val = item[1].get("impact_level", "")
+        text = strip_html_tags(field_val)
+        line = text.splitlines()[0].strip().upper() if text else "N/A"
+        return impact_order.get(line, 0)
 
-    for s in sorted_summaries:
-        component = s['component']
-        csv_path = f'{components_dir}/{component.replace(" ", "_").replace("/", "_")}.csv'
-        component_link = f'<a href="#" onclick="openCSVPage(\'{csv_path}\')">{component}</a>'
+    for project, overall_fields in project_overall_summaries.items():
+        html += '<div class="project-section">\n'
+        # Emphasized project code.
+        html += f'<div class="project-code">Project {project}</div>\n'
+        html += '<div class="summary-box">\n'
+        html += f"<strong>Overall Summary:</strong> {overall_fields.get('summary', 'N/A')}<br>\n"
+        html += f"<strong>Potential Customer Impact:</strong> {overall_fields.get('customer_impact', 'N/A')}<br>\n"
+        html += '</div>\n'
+        html += '<table>\n<thead>\n<tr>\n'
+        html += '<th>Component</th>\n'
+        html += '<th>Summary of Issues</th>\n'
+        html += '<th>Recommendations for Developers</th>\n'
+        html += '<th>Recommendations for Testers</th>\n'
+        html += '<th>Potential Customer Impact</th>\n'
+        html += '<th>Impact Level</th>\n'
+        html += '</tr>\n</thead>\n<tbody>\n'
 
-        if not s.get("summary") or not str(s.get("summary")).strip():
-            fallback_msg = (
-                "Summary unavailable, there are too many or too varied bug reports under this component for a concise overview. "
-                "Consider using more specific labels."
-            )
-            html_row = f'''
-                <tr>
-                    <td><b>{component_link}</b></td>
-                    <td colspan="5" class="center-fallback">{fallback_msg}</td>
-                </tr>
-            '''
-        else:
-            color = impact_color(s.get('impact', ''))
-            html_row = f'''
-                <tr>
-                    <td><b>{component_link}</a></b></td>
-                    <td>{s.get("summary", "")}</td>
-                    <td>{s.get("dev_recs", "")}</td>
-                    <td>{s.get("test_recs", "")}</td>
-                    <td>{s.get("impact_desc", "")}</td>
-                    <td><span class="impact" style="background:{color};">{str(s.get("impact", "")).title()}</span></td>
-                </tr>
-            '''
-        html += html_row
+        comp_summaries = project_component_summaries.get(project, {})
+        sorted_components = sorted(comp_summaries.items(), key=comp_sort_key, reverse=True)
 
-    html += """
-                </tbody>
-            </table>
-        </body>
-    </html>
-    """
+        for comp, fields in sorted_components:
+
+            csv_path = f'{output_dir}/{project}_{strip_html_tags(comp).replace(" ", "_").replace("/", "_")}.csv'
+
+            html += '<tr>\n'
+            html += f'<td class="component-name"><a href="{csv_path}">{strip_html_tags(comp)}</a></td>\n'
+            html += f'<td>{fields.get("summary", "N/A")}</td>\n'
+            html += f'<td>{fields.get("rec_devs", "N/A")}</td>\n'
+            html += f'<td>{fields.get("rec_testers", "N/A")}</td>\n'
+            html += f'<td>{fields.get("customer_impact", "N/A")}</td>\n'
+
+            # Process Impact Level.
+            field_val = fields.get("impact_level", "N/A")
+            text = strip_html_tags(field_val)
+            impact_plain = text.splitlines()[0].strip().upper() if text else "N/A"
+            if not impact_plain:
+                impact_plain = "N/A"
+
+            impact_class = "impact-default"
+            if impact_plain == "HIGH":
+                impact_class = "impact-high"
+            elif impact_plain == "MEDIUM":
+                impact_class = "impact-medium"
+            elif impact_plain == "LOW":
+                impact_class = "impact-low"
+
+            html += f'<td><span class="impact {impact_class}">{impact_plain}</span></td>\n'
+            html += '</tr>\n'
+        html += '</tbody>\n</table>\n'
+        html += '</div>\n'
+    html += '</body>\n</html>'
     return html
 
-
-if __name__ == "__main__":
-    overall = "This report summarizes the status of bug reports for various components."
-    per_component = [
-        {
-            "component": "BB",
-            "summary": "Endpoints are stable, with minor latency issues resolved.",
-            "dev_recs": "Review caching strategies.",
-            "test_recs": "Add latency testing.",
-            "impact_desc": "Minimal customer impact.",
-            "impact": "low"
-        },
-        {
-            "component": "UI",
-            "summary": "",  # Simulating a missing/empty summary for "UI"
-            "impact": "high"
-        },
-        {
-            "component": "DD",
-            "summary": "Authentication and database errors fixed in the latest patch.",
-            "dev_recs": "Monitor long-term performance.",
-            "test_recs": "Perform stress tests.",
-            "impact_desc": "Stable service.",
-            "impact": "medium"
-        }
-    ]
-
-    html_report = build_html_report(overall, per_component)
-
-    with open('test_summary.html', 'w', encoding='utf-8') as f:
-        f.write(html_report)
-
-    print("Bug Report Summary HTML generated successfully.")
