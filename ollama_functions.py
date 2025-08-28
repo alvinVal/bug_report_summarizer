@@ -1,8 +1,3 @@
-import os
-
-# Set the OLLAMA_HOST environment variable
-os.environ['OLLAMA_HOST'] = 'http://10.65.168.147:11434'
-
 import ollama
 import markdown
 import re
@@ -13,7 +8,6 @@ def parse_llm_output(raw_text):
     Parses the raw markdown output from the LLM into a dictionary.
     This function is designed to be robust against variations in whitespace and heading markers.
     """
-    # Define the section headers we expect and the keys they map to.
     section_map = {
         'summary': 'summary',
         'recommendations for developers': 'rec_devs',
@@ -21,78 +15,67 @@ def parse_llm_output(raw_text):
         'potential customer impact': 'customer_impact',
         'impact level': 'impact_level'
     }
-
-    # Initialize a dictionary to hold the content of each section.
-    sections = {
-        'summary': '', 'rec_devs': '', 'rec_testers': '',
-        'customer_impact': '', 'impact_level': ''
-    }
+    sections = {key: '' for key in section_map.values()}
 
     current_key = None
     buffer = []
 
     for line in raw_text.splitlines():
-        # Check if the line is a heading (e.g., "## Summary")
         match = re.match(r'^\s*##\s*(.*)', line, re.IGNORECASE)
         if match:
-            # If we were already building a section, save its content.
             if current_key and buffer:
                 sections[current_key] = '\n'.join(buffer).strip()
-            buffer = []  # Reset the buffer for the new section.
-
-            # Normalize the heading text to find its corresponding key.
+            buffer = []
             heading_text = match.group(1).strip().lower()
             current_key = section_map.get(heading_text)
         elif current_key:
-            # If we are inside a known section, add the line to its buffer.
             buffer.append(line)
 
-    # Save any content remaining in the buffer after the last heading.
     if current_key and buffer:
         sections[current_key] = '\n'.join(buffer).strip()
 
-    # Clean the 'impact_level' field to ensure it only contains HIGH, MEDIUM, or LOW.
     if sections.get('impact_level'):
         impact_match = re.search(r'\b(HIGH|MEDIUM|LOW)\b', sections['impact_level'], re.IGNORECASE)
-        if impact_match:
-            sections['impact_level'] = impact_match.group(1).upper()
-        else:
-            sections['impact_level'] = 'N/A'  # Default if no keyword is found
+        sections['impact_level'] = impact_match.group(1).upper() if impact_match else 'N/A'
 
     return sections
 
 
-def _generate_iterative_summary(df, initial_prompt, refinement_prompt, ollama_model, chunk_size, progress_label):
+def _generate_iterative_summary(df, initial_prompt, refinement_prompt, ollama_model, chunk_size, progress_label,
+                                cancel_event):
     """
-    Generates a summary by processing a DataFrame in chunks, showing progress and LLM output.
+    Generates a summary by processing a DataFrame in chunks, now with cancellation support.
     """
     previous_summary_md = ""
     total_reports = len(df)
 
     for i in range(0, total_reports, chunk_size):
+        if cancel_event.is_set():
+            print(f"  -> Cancellation detected in {progress_label}. Stopping summary generation.")
+            return ""
+
         chunk_df = df.iloc[i:i + chunk_size]
         chunk_csv = chunk_df.to_csv(index=False)
 
         processed_count = min(i + chunk_size, total_reports)
         print(f"  -> Processing chunk for {progress_label}: ({processed_count} of {total_reports} reports)")
 
-        if not previous_summary_md:
-            current_prompt = initial_prompt.format(reports_csv=chunk_csv)
-        else:
-            current_prompt = refinement_prompt.format(
-                previous_summary=previous_summary_md,
-                new_reports=chunk_csv
-            )
+        prompt = initial_prompt.format(reports_csv=chunk_csv) if not previous_summary_md else refinement_prompt.format(
+            previous_summary=previous_summary_md,
+            new_reports=chunk_csv
+        )
+        messages = [{"role": "system",
+                     "content": "You are a software QA expert. Always respond using the exact markdown format requested."},
+                    {"role": "user", "content": prompt}]
 
-        messages = [
-            {"role": "system",
-             "content": "You are a software QA expert. Always respond using the exact markdown format requested."},
-            {"role": "user", "content": current_prompt}
-        ]
-        response = ollama.chat(model=ollama_model, messages=messages)
+        response = ollama.chat(
+            model=ollama_model,
+            messages=messages,
+            options={'temperature': 0.2}
+        )
+
         previous_summary_md = response['message']['content']
 
-        # --- NEW: Display the LLM response in the terminal ---
         print("\n" + "--- LLM Response ---".center(60, "-"))
         print(previous_summary_md)
         print("--- End of Response ---".center(60, "-") + "\n")
@@ -100,107 +83,106 @@ def _generate_iterative_summary(df, initial_prompt, refinement_prompt, ollama_mo
     return previous_summary_md
 
 
-def generate_summary_table(df, project_component_dfs, project_col, ollama_model, chunk_size):
+def generate_summary_table(df, project_component_dfs, project_col, ollama_model, chunk_size, cancel_event, gui_app,
+                           total_summary_tasks):
     """
-    Generates summaries for each project and component with detailed progress reporting.
+    Generates summaries for each project and component, updating a detailed progress bar.
     """
     project_overall_summaries = {}
     project_component_summaries = {}
+    completed_tasks = 0
 
     for project, components in project_component_dfs.items():
+        if cancel_event.is_set(): break
+
         project_data = df[df[project_col] == project]
 
-        # --- Prompts for Overall Project Summary ---
-        overall_initial_prompt = (f"""
-            Analyze the following bug reports for project '{project}', and write a concise overall summary of key recurring issues and their impact across all components.
-            List main issue areas and recurring trends as bullet points, and provide a short customer impact summary. Use markdown formatting.
-            Please follow this format exactly. Example:
-            ## Summary
-            - Example bullet 1 (grouped issue)
-            - Example bullet 2
-
-            ## Potential Customer Impact
-            Two sentences.
-
-            Bug Reports:
-            {{reports_csv}}
-            """
-                                  )
-        overall_refinement_prompt = (f"""
-            Based on the existing summary and the new bug reports provided below, generate a single, updated, and a concise overall summary of key recurring issues and their impact across all components for project '{project}'.
-            List main issue areas and recurring trends as bullet points, and provide a short customer impact summary. There should only be 5 bullets at most for the summary. Use markdown formatting.
-            Please follow this format exactly. Example:
-            ## Summary
-            - Example bullet 1 (grouped issue)
-            - Example bullet 2
-
-            ## Potential Customer Impact
-            Two sentences.
-
-            ## Existing Summary:
-            {{previous_summary}}
-
-            ## New Bug Reports:
-            {{new_reports}}
-            """
-                                     )
+        # --- FIX: Made prompts stricter and more direct to avoid model confusion ---
+        overall_initial_prompt = (
+            f"You are a helpful assistant that ALWAYS follows the requested response format. "
+            f"Analyze the following bug reports for project '{project}'.\n"
+            "Your response MUST be in Markdown format and MUST use the following headers EXACTLY as written. Do not add any other headers or introductory text.\n\n"
+            "## Summary\n"
+            "* (Provide a bulleted list of key findings and recurring issues. Maximum 5 points.)\n\n"
+            "## Potential Customer Impact\n"
+            "(Provide a one or two sentence description of the potential customer impact.)\n\n"
+            "--- Bug Reports to Analyze ---\n"
+            "{{reports_csv}}"
+        )
+        overall_refinement_prompt = (
+            f"You are a helpful assistant that ALWAYS follows the requested response format. "
+            f"An existing summary for project '{project}' is provided below, along with a new batch of bug reports. "
+            "Combine all information into a single, updated, comprehensive analysis.\n"
+            "Your response MUST be in Markdown format and MUST use the following headers EXACTLY as written. Do not add any other headers or introductory text.\n\n"
+            "## Summary\n"
+            "* (Provide a new, updated bulleted list of key findings and recurring issues. Maximum 5 points.)\n\n"
+            "## Potential Customer Impact\n"
+            "(Provide a new, updated one or two sentence description of the potential customer impact.)\n\n"
+            "--- Existing Summary ---\n"
+            "{{previous_summary}}\n\n"
+            "--- New Bug Reports to Analyze ---\n"
+            "{{new_reports}}"
+        )
+        # --- END OF FIX ---
 
         print(f"\nProject {project} (Overall Summary): \n" + "=" * 40)
         overall_label = f"Project {project} Overall"
 
+        status_text = f"Summarizing: {project[:35]}..."
+        progress_val = 10 + (completed_tasks / total_summary_tasks) * 90
+        percent_text = f"{int(progress_val)}%"
+        gui_app.after(0, gui_app.update_progress, progress_val, percent_text, status_text)
+
         overall_summary_md = _generate_iterative_summary(
-            project_data, overall_initial_prompt, overall_refinement_prompt, ollama_model, chunk_size, overall_label
+            project_data, overall_initial_prompt, overall_refinement_prompt, ollama_model, chunk_size, overall_label,
+            cancel_event
         )
+        if cancel_event.is_set(): break
+
+        completed_tasks += 1
         overall_fields_raw = parse_llm_output(overall_summary_md)
         project_overall_summaries[project] = {key: markdown.markdown(value) for key, value in
                                               overall_fields_raw.items()}
 
         project_component_summaries[project] = {}
         for comp, sub_df in components.items():
-            # --- Prompts for Component Summary ---
+            if cancel_event.is_set(): break
+
             comp_initial_prompt = (
-                f"Given the following bug reports for the '{comp}' component in project '{project}'.\n"
-                "1. Summarize the key findings and recurring issues as a bullet list, with a maximum of 5 concise bullet points.\n"
-                "2. Provide separate bulleted recommendations for developers.\n"
-                "3. Provide separate bulleted recommendations for testers.\n"
-                "4. Add a one or two sentence potential customer impact description.\n"
-                "5. Rate the customer impact as HIGH, MEDIUM, or LOW, depending on how much a customer can be affected. Only answer either of the three.\n"
-                "Respond in Markdown format, use clear section markers, do not ever respond in any other way:\n"
-                "## Summary\n(bulleted list)\n\n"
-                "## Recommendations for Developers\n(bulleted list)\n\n"
-                "## Recommendations for Testers\n(bulleted list)\n\n"
-                "## Potential Customer Impact\n(one or two sentences)\n\n"
-                "## Impact Level\n(Write: Impact: HIGH/MEDIUM/LOW)\n\n"
-                "Bug Reports:\n{{reports_csv}}"
+                f"You are a helpful assistant that ALWAYS follows the requested response format. Analyze bug reports for the '{comp}' component in project '{project}'.\n"
+                "Your response MUST be in Markdown and use these headers EXACTLY:\n\n"
+                "## Summary\n* (Bulleted list of findings.)\n\n## Recommendations for Developers\n* (Bulleted list.)\n\n## Recommendations for Testers\n* (Bulleted list.)\n\n"
+                "## Potential Customer Impact\n(One or two sentences.)\n\n## Impact Level\n(ONLY ONE of: HIGH, MEDIUM, or LOW)\n\n"
+                "--- Bug Reports to Analyze ---\n{{reports_csv}}"
             )
             comp_refinement_prompt = (
-                f"Below is an existing summary for the '{comp}' component and a new batch of reports.\n"
-                "Combine all information to create a single, new, comprehensive summary.\n"
-                "1. Summarize the key findings and recurring issues as a bullet list, with a maximum of 5 concise bullet points.\n"
-                "2. Provide separate bulleted recommendations for developers.\n"
-                "3. Provide separate bulleted recommendations for testers.\n"
-                "4. Add a one or two sentence potential customer impact description.\n"
-                "5. Rate the customer impact as HIGH, MEDIUM, or LOW, depending on how much a customer can be affected. Only answer either of the three.\n"
-                "Respond in Markdown format, use clear section markers, do not ever respond in any other way:\n"
-                "## Summary\n(bulleted list with asterisks)\n\n"
-                "## Recommendations for Developers\n(bulleted list with asterisks)\n\n"
-                "## Recommendations for Testers\n(bulleted list with asterisks)\n\n"
-                "## Potential Customer Impact\n(one or two sentences)\n\n"
-                "## Impact Level\n(Write: Impact: HIGH/MEDIUM/LOW)\n\n"
-                "## Existing Summary:\n{{previous_summary}}\n\n"
-                "## New Bug Reports:\n{{new_reports}}"
+                f"You are a helpful assistant. An existing summary for '{comp}' is below, along with new reports. Combine all information into an updated analysis.\n"
+                "Your response MUST be in Markdown and use these headers EXACTLY:\n\n"
+                "## Summary\n* (New bulleted list.)\n\n## Recommendations for Developers\n* (New bulleted list.)\n\n## Recommendations for Testers\n* (New bulleted list.)\n\n"
+                "## Potential Customer Impact\n(New one or two sentences.)\n\n## Impact Level\n(ONLY ONE of: HIGH, MEDIUM, or LOW)\n\n"
+                "--- Existing Summary ---\n{{previous_summary}}\n\n--- New Bug Reports to Analyze ---\n{{new_reports}}"
             )
 
             print(f"Project {project} | Component {comp} (Summary):\n" + "-" * 40)
             component_label = f"Component '{comp}'"
 
-            comp_summary_md = _generate_iterative_summary(
-                sub_df, comp_initial_prompt, comp_refinement_prompt, ollama_model, chunk_size, component_label
-            )
-            comp_fields_raw = parse_llm_output(comp_summary_md)
+            status_text = f"Summarizing: {comp[:35]}..."
+            progress_val = 10 + (completed_tasks / total_summary_tasks) * 90
+            percent_text = f"{int(progress_val)}%"
+            gui_app.after(0, gui_app.update_progress, progress_val, percent_text, status_text)
 
+            comp_summary_md = _generate_iterative_summary(
+                sub_df, comp_initial_prompt, comp_refinement_prompt, ollama_model, chunk_size, component_label,
+                cancel_event
+            )
+            if cancel_event.is_set(): break
+
+            completed_tasks += 1
+            comp_fields_raw = parse_llm_output(comp_summary_md)
             comp_fields_html = {key: markdown.markdown(value) for key, value in comp_fields_raw.items()}
             comp_fields_html['impact_level'] = comp_fields_raw.get('impact_level', 'N/A')
             project_component_summaries[project][comp] = comp_fields_html
+
+        if cancel_event.is_set(): break
 
     return project_overall_summaries, project_component_summaries

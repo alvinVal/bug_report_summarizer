@@ -1,68 +1,10 @@
-import os
-import webbrowser
-from preprocess import load_and_preprocess, split_by_project_and_component
-from ollama_functions import generate_summary_table
-from webpage import build_html_report
-from graphs import (
-    generate_reports_per_component_bar,
-    generate_resolution_pie,
-    generate_grouped_bar_chart,
-    generate_reports_over_time_line,
-)
+from gui import BugReportGUI
 
-# For faster outputs
-# OLLAMA_MODEL = 'llama3:8b'
+if __name__ == "__main__":
+    """
+    Main entry point for the application.
 
-# For better outputs
-OLLAMA_MODEL = 'llama3.3:70b-instruct-q2_K'
-
-CHUNK_SIZE = 5
-
-if __name__ == '__main__':
-    csv_filepath = 'project_data.csv'
-    component_cols = ['Component/s']
-    project_col = 'Dyson Project List'
-    output_dir = './project_component_csvs'
-
-    # Create output directory if it doesn't exist
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    # Preprocess data once for all operations.
-    all_df = load_and_preprocess(csv_filepath, component_cols, project_col)
-
-    # --- Generate all graphs for each project ---
-    project_graphs = {}
-    for project_code in all_df[project_col].unique():
-        project_df = all_df[all_df[project_col] == project_code]
-        project_graphs[project_code] = {
-            'reports_per_component': generate_reports_per_component_bar(project_df),
-            'resolution_pie': generate_resolution_pie(project_df),
-            'priority_chart': generate_grouped_bar_chart(project_df, 'Priority'),
-            'severity_chart': generate_grouped_bar_chart(project_df, 'Severity'),
-            'reports_over_time': generate_reports_over_time_line(project_df),
-        }
-
-    # Split data and save component-level CSVs.
-    project_component_dfs = split_by_project_and_component(all_df, project_col, output_dir)
-
-    # Generate AI summaries.
-    project_overall_summaries, project_component_summaries = generate_summary_table(
-        all_df, project_component_dfs, project_col, OLLAMA_MODEL, CHUNK_SIZE
-    )
-
-    # Build the HTML report with summaries and graphs.
-    html_report = build_html_report(
-        project_overall_summaries,
-        project_component_summaries,
-        project_graphs,  # Pass graphs to the report builder
-        output_dir
-    )
-
-    # Save and open the report.
-    output_file = 'bug_report_summary.html'
-    with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(html_report)
-
-    path = os.path.abspath(output_file)
-    webbrowser.open(f'file://{path}')
+    This script initializes and runs the main graphical user interface.
+    """
+    app = BugReportGUI()
+    app.mainloop()

@@ -1,3 +1,7 @@
+import matplotlib
+# This must be done BEFORE importing pyplot to avoid threading issues in the GUI.
+matplotlib.use('Agg')
+
 import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -122,7 +126,7 @@ def generate_reports_over_time_line(project_df):
     df_time = project_df.copy()
 
     monthly_counts = df_time.groupby(
-        pd.Grouper(key='Created', freq='ME')
+        pd.Grouper(key='Created', freq=pd.offsets.MonthEnd())
     ).size().reset_index(name='Count')
 
     plt.figure(figsize=(12, 6))
