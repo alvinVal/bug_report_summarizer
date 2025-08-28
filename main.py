@@ -4,9 +4,9 @@ from preprocess import load_and_preprocess, split_by_project_and_component
 from ollama_functions import generate_summary_table
 from webpage import build_html_report
 
-
 # For faster outputs
 OLLAMA_MODEL = 'llama3.1:8b'
+
 
 if __name__ == '__main__':
     csv_filepath = 'project_data.csv'

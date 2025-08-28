@@ -1,7 +1,6 @@
 import pandas as pd
 import os
 
-
 def load_and_preprocess(csv_path, component_cols, project_col):
     """
     Reads the CSV, combines component columns into an 'All_Components' field,
