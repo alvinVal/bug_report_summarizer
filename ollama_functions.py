@@ -1,8 +1,3 @@
-import os
-
-# Set the OLLAMA_HOST environment variable
-os.environ['OLLAMA_HOST'] = 'http://10.65.168.147:11434'
-
 import ollama
 import markdown
 import re
