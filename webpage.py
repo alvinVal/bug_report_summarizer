@@ -1,153 +1,161 @@
-import re
-
-
-def strip_html_tags(text):
-    return re.sub(r'<[^>]*>', '', text or '').strip()
-
-
-def generate_singular_overall_summary(project_overall_summaries):
-    combined_md = "## Combined Summary\n"
-    for project, fields in project_overall_summaries.items():
-        combined_md += f"### Project {project}\n"
-        summary = fields.get('summary', '')
-        impact = fields.get('customer_impact', '')
-        if summary:
-            combined_md += summary.strip() + "\n"
-        if impact:
-            combined_md += f"**Customer Impact:** {impact.strip()}\n"
-        combined_md += "\n"
-    try:
-        import markdown
-        return markdown.markdown(combined_md)
-    except ImportError:
-        return combined_md
-
-
-def build_html_report(project_overall_summaries, project_component_summaries, output_dir):
+def build_html_report(project_overall_summaries, project_component_summaries, project_graphs, output_dir):
     """
-    Assembles all per-project and per-component summaries in a single table,
-    with merged (rowspan) project cells, sorted by descending impact, and with component hyperlinks.
+    Builds an HTML report with a clean, multi-row dashboard layout for graphs,
+    followed by the AI summary and the detailed component table.
     """
     html = '''
     <html>
     <head>
       <meta charset="UTF-8">
       <title>Bug Report Summary</title>
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+      <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
       <style>
         body {
           font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-          margin: 40px;
+          margin: 0;
           background: #f1f3f6;
+          color: #333;
+        }
+        .project-section {
+          background: #fff;
+          border-radius: 16px;
+          box-shadow: 0 8px 16px rgba(0,0,0,0.05);
+          margin-bottom: 60px;
+          overflow: hidden;
+        }
+        .project-header {
+          font-size: 28px;
+          font-weight: bold;
+          color: #fff;
+          background: linear-gradient(135deg, #0072ff, #00c6ff);
+          padding: 20px 30px;
+        }
+        .dashboard, .summary-section, .table-section {
+          padding: 30px;
+        }
+        .section-title {
+          font-size: 22px;
+          font-weight: 600;
+          color: #29384a;
+          margin-bottom: 24px;
+          border-bottom: 2px solid #ddd;
+          padding-bottom: 8px;
+        }
+        .graph-box {
+          border: 1px solid #e3e3e3;
+          border-radius: 12px;
+          padding: 15px;
+          box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+          height: 100%;
         }
         .summary-box {
           background: #004080;
           color: #fff;
           padding: 24px;
           border-radius: 12px;
-          margin-bottom: 36px;
-          font-size: 18px;
+          font-size: 16px;
           box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
+        .summary-box h3 { margin-top: 0; }
         table {
           width: 100%;
           border-collapse: collapse;
           background: #fff;
-          margin-bottom: 20px;
-          border: 1px solid #ddd;
-          box-shadow: 0px 2px 4px rgba(0,0,0,0.1);
+          margin-top: 20px;
         }
         th, td {
           padding: 14px 12px;
           border: 1px solid #e3e3e3;
           vertical-align: top;
           white-space: pre-wrap;
+          text-align: left;
         }
-        td.component-name {
-          vertical-align: middle;
-        }
-        th {
-          background: #29384a;
-          color: #fff;
-          font-weight: bold;
-        }
-        tr:hover td {
-          background: #eef2f6;
-        }
+        td.component-name { vertical-align: middle; font-weight: bold; }
+        th { background: #29384a; color: #fff; font-weight: bold; }
+        tr:hover td { background: #eef2f6; }
         .impact {
-          font-weight: bold;
-          color: #fff;
-          border-radius: 8px;
-          padding: 4px 12px;
-          display: inline-block;
+          font-weight: bold; color: #fff; border-radius: 8px;
+          padding: 4px 12px; display: inline-block; text-align: center;
         }
-        .impact-high {
-          background: #d9534f;
-        }
-        .impact-medium {
-          background: #f0ad4e;
-        }
-        .impact-low {
-          background: #5cb85c;
-        }
-        .impact-default {
-          background: #777;
-        }
+        .impact-high { background: #d9534f; }
+        .impact-medium { background: #f0ad4e; }
+        .impact-low { background: #5cb85c; }
+        .impact-default { background: #777; }
       </style>
     </head>
-    <body>
+    <body><div class="container-fluid p-5">
     '''
-    # 1. SINGLE OVERALL SUMMARY BOX
-    singular_summary_html = generate_singular_overall_summary(project_overall_summaries)
-    html += f'<div class="summary-box">{singular_summary_html}</div>\n'
-
-    # 2. Prepare sorted rows project-by-project, keeping their order for rendering
     impact_order = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
-    # For keeping merged rows, collect: {project: [ (component, fields, impact_plain) ]}
-    project_rows = {}
-    for project, comp_summaries in project_component_summaries.items():
-        rows = []
-        for comp, fields in comp_summaries.items():
-            # Parse/plain the impact
-            field_val = fields.get("impact_level", "")
-            text = strip_html_tags(field_val)
-            impact_plain = text.splitlines()[0].strip().upper() if text else "N/A"
-            if not impact_plain:
-                impact_plain = "N/A"
-            rows.append((comp, fields, impact_plain))
-        # Sort within project
-        rows = sorted(rows, key=lambda tup: impact_order.get(tup[2], 0), reverse=True)
-        project_rows[project] = rows
 
-    # 3. Final rendering: single table, merged project cells, sorted within project
-    html += '<table>\n<thead>\n<tr>\n'
-    html += '<th>Project</th>\n'
-    html += '<th>Component</th>\n'
-    html += '<th>Summary of Issues</th>\n'
-    html += '<th>Recommendations for Developers</th>\n'
-    html += '<th>Recommendations for Testers</th>\n'
-    html += '<th>Potential Customer Impact</th>\n'
-    html += '<th>Impact Level</th>\n'
-    html += '</tr>\n</thead>\n<tbody>\n'
+    def comp_sort_key(item):
+        line = item[1].get("impact_level", "").strip().upper()
+        return impact_order.get(line, 0)
 
-    for project, rows in project_rows.items():
-        rowspan = len(rows)
-        first = True
-        for comp, fields, impact_plain in rows:
+    for project, overall_fields in project_overall_summaries.items():
+        graphs = project_graphs.get(project, {})
+        html += '<div class="project-section">\n'
+        html += f'<div class="project-header">Project {project}</div>\n'
+
+        # --- Graphs Dashboard Section ---
+        html += '<div class="dashboard">\n'
+        html += '<div class="section-title">Project Health Dashboard</div>\n'
+
+        # --- Bootstrap Grid for Graphs ---
+        html += '<div class="row g-4">\n'
+
+        # --- Row 1: Bar and Pie Charts Side-by-Side ---
+        html += '<div class="col-md-8">\n'
+        html += f'<div class="graph-box">{graphs.get("reports_per_component", "")}</div>\n'
+        html += '</div>\n'
+        html += '<div class="col-md-4">\n'
+        html += f'<div class="graph-box">{graphs.get("resolution_pie", "")}</div>\n'
+        html += '</div>\n'
+
+        # --- Row 2: Priority and Severity Charts ---
+        html += '<div class="col-md-6">\n'
+        html += f'<div class="graph-box">{graphs.get("priority_chart", "")}</div>\n'
+        html += '</div>\n'
+        html += '<div class="col-md-6">\n'
+        html += f'<div class="graph-box">{graphs.get("severity_chart", "")}</div>\n'
+        html += '</div>\n'
+
+        # --- Row 3: Time Series Chart (Full Width) ---
+        html += '<div class="col-12">\n'
+        html += f'<div class="graph-box">{graphs.get("reports_over_time", "")}</div>\n'
+        html += '</div>\n'
+
+        html += '</div>\n</div>\n'
+
+        # --- AI Summary Section ---
+        html += '<div class="summary-section">\n'
+        html += '<div class="section-title">AI Generated Summary</div>\n'
+        html += '<div class="summary-box">\n'
+        html += f"<h3>Overall Summary</h3>{overall_fields.get('summary', 'N/A')}\n"
+        html += f"<h3>Potential Customer Impact</h3>{overall_fields.get('customer_impact', 'N/A')}\n"
+        html += '</div>\n</div>\n'
+
+        # --- Detailed Table Section ---
+        html += '<div class="table-section">\n'
+        html += '<div class="table-responsive">\n'
+        html += '<table class="table table-bordered table-hover">\n<thead>\n<tr>\n'
+        html += '<th>Component</th><th>Summary of Issues</th><th>Recommendations for Developers</th>'
+        html += '<th>Recommendations for Testers</th><th>Potential Customer Impact</th><th>Impact Level</th>\n'
+        html += '</tr>\n</thead>\n<tbody>\n'
+
+        comp_summaries = project_component_summaries.get(project, {})
+        sorted_components = sorted(comp_summaries.items(), key=comp_sort_key, reverse=True)
+
+        for comp, fields in sorted_components:
+            csv_path = f'{output_dir}/{project}_{comp.replace(" ", "_").replace("/", "_")}.csv'
             html += '<tr>\n'
-            # Only output <td rowspan=...> for this project on the first component row
-            if first:
-                html += f'<td rowspan="{rowspan}">{project}</td>\n'
-                first = False
-
-            csv_path = f'{output_dir}/{project}_{strip_html_tags(comp).replace(" ", "_").replace("/", "_")}.csv'
-
-            html += f'<td class="component-name"><a href="{csv_path}">{strip_html_tags(comp)}</a></td>\n'
+            html += f'<td class="component-name"><a href="{csv_path}">{comp}</a></td>\n'
             html += f'<td>{fields.get("summary", "N/A")}</td>\n'
             html += f'<td>{fields.get("rec_devs", "N/A")}</td>\n'
             html += f'<td>{fields.get("rec_testers", "N/A")}</td>\n'
             html += f'<td>{fields.get("customer_impact", "N/A")}</td>\n'
 
-            # Color for impact
+            impact_plain = fields.get("impact_level", "N/A").strip().upper()
             impact_class = "impact-default"
             if impact_plain == "HIGH":
                 impact_class = "impact-high"
@@ -155,9 +163,12 @@ def build_html_report(project_overall_summaries, project_component_summaries, ou
                 impact_class = "impact-medium"
             elif impact_plain == "LOW":
                 impact_class = "impact-low"
-            html += f'<td><span class="impact {impact_class}">{impact_plain}</span></td>\n'
+
+            html += f'<td><span class="impact {impact_class}">{impact_plain or "N/A"}</span></td>\n'
             html += '</tr>\n'
 
-    html += '</tbody>\n</table>\n'
-    html += '</body>\n</html>'
+        html += '</tbody>\n</table>\n</div>\n</div>\n'
+        html += '</div>\n'
+
+    html += '</div><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script></body>\n</html>'
     return html
